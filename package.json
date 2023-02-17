@@ -1,0 +1,35 @@
+{
+  "scripts": {
+    "start": "node src/server",
+    "start:dev": "bash scripts/run.sh dev",
+    "start:prod": "bash scripts/run.sh prod",
+    "build:prod": "bash scripts/build.sh prod",
+    "test": "TESTING=true npx mocha --timeout 5s"
+  },
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.209.0",
+    "@holonym-foundation/utils": "^1.0.1",
+    "axios": "^0.27.2",
+    "big-integer": "^1.6.51",
+    "circomlibjs-old": "npm:circomlibjs@^0.0.8",
+    "cors": "^2.8.5",
+    "date-fns": "^2.29.3",
+    "dotenv": "^16.0.1",
+    "ethers": "^5.6.9",
+    "express": "^4.18.1",
+    "holonym-wasm-issuer": "^0.2.2",
+    "mongodb": "^4.11.0",
+    "mongoose": "^6.7.2",
+    "uuid": "^9.0.0",
+    "zokrates-js": "^1.1.5"
+  },
+  "devDependencies": {
+    "chai": "^4.3.6",
+    "chai-as-promised": "^7.1.1",
+    "eslint": "^8.20.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.26.0",
+    "mocha": "^10.0.0"
+  }
+}
