@@ -5,6 +5,7 @@ import { poseidon } from "circomlibjs-old";
 import { v4 as uuidV4 } from "uuid";
 import { UserVerification, zokProvider, alchemyProviders } from "../init.js";
 import { issue } from "holonym-wasm-issuer";
+import { specialtyToTokenID } from "../constants/index.js";
 import contractAddresses from "../constants/contract-addresses.js";
 import ABIs from "../constants/abis.js";
 import { logWithTimestamp } from "../utils/utils.js";
@@ -20,8 +21,6 @@ async function validatePostRequestParams(firstName, lastName, npiNumber, proof) 
   // Verify proof
   try {
     // public proof inputs: root, issuerAddr, firstName, lastName,
-    // TODO: Do we need the proof to verify that the user is from the US?
-    //       What else do we need the proof to verify?
     const rootsContract = new ethers.Contract(
       process.env.NODE_ENV == "development"
         ? contractAddresses.Roots.testnet["optimism-goerli"]
@@ -141,7 +140,7 @@ async function handlePost(req, res) {
   const npiResult = npiRegistryData.results[0];
   // It is necessary to check names for equality because the NPI registry will return a result
   // even if the name only partially matches the query.
-  if (npiResult.basic.first_name.toLowerCase() != firstName.toLowerCase()) {
+  if (npiResult.basic?.first_name.toLowerCase() != firstName.toLowerCase()) {
     logWithTimestamp(
       `POST /verification: First name in NPI registry does not match first name provided by user. First name in NPI registry: ${npiResult.basic.first_name}, first name provided by user: ${firstName}`
     );
@@ -150,7 +149,7 @@ async function handlePost(req, res) {
       message: "First name in NPI registry does not match first name provided by user",
     });
   }
-  if (npiResult.basic.last_name.toLowerCase() != lastName.toLowerCase()) {
+  if (npiResult.basic?.last_name.toLowerCase() != lastName.toLowerCase()) {
     logWithTimestamp(
       `POST /verification: Last name in NPI registry does not match last name provided by user. Last name in NPI registry: ${npiResult.basic.last_name}, last name provided by user: ${lastName}`
     );
@@ -159,13 +158,87 @@ async function handlePost(req, res) {
       message: "Last name in NPI registry does not match last name provided by user",
     });
   }
+  const validCredentialTypes = ["M.D.", "MD", "D.O.", "DO"];
+  if (!validCredentialTypes.includes(npiResult.basic?.credential)) {
+    logWithTimestamp(
+      `POST /verification: User's credential type is not valid. Credential: ${npiResult.basic.credential}`
+    );
+    return res.status(400).json({
+      error: true,
+      message: "User's credential type is not valid",
+    });
+  }
+  const primaryTaxonomy = (npiResult.taxonomies ?? []).find(
+    (taxonomy) => taxonomy.primary === true
+  );
+  if (!primaryTaxonomy?.license) {
+    logWithTimestamp(
+      `POST /verification: NPI registry does not list a license for this user. NPI number: ${npiNumber}`
+    );
+    return res.status(400).json({
+      error: true,
+      message: "NPI registry does not list a license for this user",
+    });
+  }
+  if (!primaryTaxonomy?.desc) {
+    logWithTimestamp(
+      `POST /verification: NPI registry does not list a specialty for this user. NPI number: ${npiNumber}`
+    );
+    return res.status(400).json({
+      error: true,
+      message: "NPI registry does not list a specialty for this user",
+    });
+  }
 
-  // TODO: Check that there isn't already a UserVerification record for this registration number
+  let specialtyAsNumber;
+  for (const specialty of Object.keys(specialtyToTokenID)) {
+    if (primaryTaxonomy.desc.toLowerCase().includes(specialty.toLowerCase())) {
+      specialtyAsNumber = specialtyToTokenID[specialty];
+      break;
+    }
+  }
+  if (typeof specialtyAsNumber !== "number") {
+    logWithTimestamp(
+      `POST /verification: Unsupported specialty. NPI number: ${npiNumber}, specialty: ${primaryTaxonomy.desc}`
+    );
+    return res.status(400).json({
+      error: true,
+      message: "Unsupported specialty",
+    });
+  }
+
+  const currentUserVerification = await UserVerification.findOne({
+    npiNumber: npiNumber,
+  });
+  if (currentUserVerification && currentUserVerification.retrievedCredentialsAt) {
+    logWithTimestamp(
+      `POST /verification: User has already been issued credentials. NPI number: ${npiNumber}`
+    );
+    return res.status(400).json({
+      error: true,
+      message: "User has already been issued credentials",
+    });
+  } else if (
+    currentUserVerification &&
+    !currentUserVerification.retrievedCredentialsAt
+  ) {
+    logWithTimestamp(
+      `POST /verification: User has already submitted a verification request. NPI number: ${npiNumber}`
+    );
+    return res.status(400).json({
+      error: true,
+      message: "User has already submitted a verification request",
+    });
+  }
 
   const id = uuidV4();
   const userVerification = new UserVerification({
     id,
     npiNumber,
+    specialty: specialtyAsNumber,
+    license: primaryTaxonomy.license,
+    // standardize medical credentials string so that it is always either "MD" or "DO"
+    medicalCredentials: npiResult.basic.credential.replaceAll(".", "").toUpperCase(),
   });
   await userVerification.save();
   logWithTimestamp(
@@ -222,21 +295,50 @@ async function handleGetCredentials(req, res) {
     });
   }
 
-  // TODO: Add a field to UserVerification model to store whether the user has retrieved their credentials.
-  // And check that field here.
+  // NOTE: Re: specialty being encoded as a number:
+  // Morgan Stuart of MedDAO: "when @gcecil made the Edition contract on thirdweb
+  // to mint the NFT’s he assigned a number to each specialty— actually becomes
+  // very important because that is how we will achieve organizational structure
+  // within medDAO and its tools/primitives
 
-  // TODO: What info from NPI do we want to issue? Is NPI number enough?
-
+  const npiNumLicenseMedCredsHash = poseidon([
+    ethers.BigNumber.from(user.npiNumber),
+    ethers.BigNumber.from(Buffer.from(user.license)),
+    ethers.BigNumber.from(Buffer.from(user.medicalCredentials)),
+  ]);
   const metadata = {
     rawCreds: {
+      specialty: user.specialty,
       npiNumber: user.npiNumber,
+      license: user.license,
+      medicalCredentials: user.medicalCredentials,
     },
-    // derivedCreds: {},
-    fieldsInLeaf: ["issuer", "secret", "rawCreds.npiNumber.value", "", "iat", "scope"],
+    derivedCreds: {
+      npiNumLicenseMedCredsHash: {
+        value: npiNumLicenseMedCredsHash,
+        derivationFunction: "poseidon",
+        inputFields: [
+          "rawCreds.npiNumber",
+          "rawCreds.license",
+          "rawCreds.medicalCredentials",
+        ],
+      },
+    },
+    fieldsInLeaf: [
+      "issuer",
+      "secret",
+      "rawCreds.specialty",
+      "derivedCreds.npiNumLicenseMedCredsHash.value",
+      "iat",
+      "scope",
+    ],
   };
 
   const response = issue(process.env.HOLONYM_ISSUER_PRIVKEY, user.npiNumber, "0");
   response.metadata = metadata;
+
+  user.retrievedCredentialsAt = new Date().getTime();
+  await user.save();
 
   return res.status(200).json(response);
 }

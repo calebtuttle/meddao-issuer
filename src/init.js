@@ -50,7 +50,25 @@ async function initializeMongoDb() {
       type: String,
       required: true,
     },
+    // retrievedCredentialsAt: UNIX timestamp at which the user was issued
+    // their credentials from this issuer (unrelated to medical credentials)
+    retrievedCredentialsAt: {
+      type: Number,
+      required: false,
+    },
     npiNumber: {
+      type: String,
+      required: true,
+    },
+    specialty: {
+      type: Number,
+      required: true,
+    },
+    license: {
+      type: String,
+      required: true,
+    },
+    medicalCredentials: {
       type: String,
       required: true,
     },
