@@ -22,6 +22,6 @@ RUN npm ci --omit=dev
 
 COPY . .
 
-EXPOSE 3000
+EXPOSE 3007
 
 CMD ["dumb-init", "node", "./src/server"]
