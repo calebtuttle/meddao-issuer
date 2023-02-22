@@ -3,12 +3,13 @@ import ethersPkg from "ethers";
 const { ethers } = ethersPkg;
 import { poseidon } from "circomlibjs-old";
 import { v4 as uuidV4 } from "uuid";
-import { UserVerification, zokProvider, alchemyProviders } from "../init.js";
+import { zokProvider, alchemyProviders } from "../init.js";
 import { issue } from "holonym-wasm-issuer";
 import { specialtyToTokenID } from "../constants/index.js";
 import contractAddresses from "../constants/contract-addresses.js";
 import ABIs from "../constants/abis.js";
 import { logWithTimestamp } from "../utils/utils.js";
+import dynamodb from "../utils/dynamodb.js";
 
 async function validatePostRequestParams(firstName, lastName, npiNumber, proof) {
   if (!firstName || !lastName || !npiNumber || !proof) {
@@ -207,10 +208,9 @@ async function handlePost(req, res) {
     });
   }
 
-  const currentUserVerification = await UserVerification.findOne({
-    npiNumber: npiNumber,
-  });
-  if (currentUserVerification && currentUserVerification.retrievedCredentialsAt) {
+  const currentUser = await dynamodb.getUserByNpiNumber(npiNumber);
+
+  if (currentUser && currentUser.retrievedCredentialsAt?.S) {
     logWithTimestamp(
       `POST /verification: User has already been issued credentials. NPI number: ${npiNumber}`
     );
@@ -218,12 +218,9 @@ async function handlePost(req, res) {
       error: true,
       message: "User has already been issued credentials",
     });
-  } else if (
-    currentUserVerification &&
-    !currentUserVerification.retrievedCredentialsAt
-  ) {
+  } else if (currentUser && !currentUser.retrievedCredentialsAt?.S) {
     logWithTimestamp(
-      `POST /verification: User has already submitted a verification request. NPI number: ${npiNumber}`
+      `POST /verification: User has already submitted a verification request. NPI number: ${npiNumber}. ID: ${currentUser.id}`
     );
     return res.status(400).json({
       error: true,
@@ -232,15 +229,14 @@ async function handlePost(req, res) {
   }
 
   const id = uuidV4();
-  const userVerification = new UserVerification({
+  await dynamodb.putMinimalUser(
     id,
     npiNumber,
-    specialty: specialtyAsNumber,
-    license: primaryTaxonomy.license,
+    specialtyAsNumber,
+    primaryTaxonomy.license,
     // standardize medical credentials string so that it is always either "MD" or "DO"
-    medicalCredentials: npiResult.basic.credential.replaceAll(".", "").toUpperCase(),
-  });
-  await userVerification.save();
+    npiResult.basic.credential.replaceAll(".", "").toUpperCase()
+  );
   logWithTimestamp(
     `POST /verification: Saved verification request to database. NPI number: ${npiNumber}`
   );
@@ -280,18 +276,25 @@ async function handleGetCredentials(req, res) {
   // const npiNumber = req.query.npiNumber;
   const id = req.query.id;
 
-  const user = await UserVerification.findOne({
-    id,
-  }).exec();
-  if (!user) {
+  if (!id) {
     return res.status(400).json({
-      error: "User not found",
+      error: true,
+      message: "Missing ID",
     });
   }
 
-  if (!user.approved) {
+  const user = await dynamodb.getUserById(id);
+
+  if (!user) {
     return res.status(400).json({
-      error: "User not approved",
+      error: true,
+      message: "User not found",
+    });
+  }
+  if (user.retrievedCredentialsAt?.S) {
+    return res.status(400).json({
+      error: true,
+      message: "User has already retrieved credentials",
     });
   }
 
@@ -301,17 +304,19 @@ async function handleGetCredentials(req, res) {
   // very important because that is how we will achieve organizational structure
   // within medDAO and its tools/primitives
 
-  const npiNumLicenseMedCredsHash = poseidon([
-    ethers.BigNumber.from(user.npiNumber),
-    ethers.BigNumber.from(Buffer.from(user.license)),
-    ethers.BigNumber.from(Buffer.from(user.medicalCredentials)),
-  ]);
+  const npiNumLicenseMedCredsHash = ethers.BigNumber.from(
+    poseidon([
+      ethers.BigNumber.from(user.npiNumber.S),
+      ethers.BigNumber.from(Buffer.from(user.license.S)),
+      ethers.BigNumber.from(Buffer.from(user.medicalCredentials.S)),
+    ])
+  ).toString();
   const metadata = {
     rawCreds: {
-      specialty: user.specialty,
-      npiNumber: user.npiNumber,
-      license: user.license,
-      medicalCredentials: user.medicalCredentials,
+      specialty: user.specialty.N,
+      npiNumber: user.npiNumber.S,
+      license: user.license.S,
+      medicalCredentials: user.medicalCredentials.S,
     },
     derivedCreds: {
       npiNumLicenseMedCredsHash: {
@@ -334,11 +339,10 @@ async function handleGetCredentials(req, res) {
     ],
   };
 
-  const response = issue(process.env.HOLONYM_ISSUER_PRIVKEY, user.npiNumber, "0");
+  const response = issue(process.env.HOLONYM_ISSUER_PRIVKEY, user.npiNumber.S, "0");
   response.metadata = metadata;
 
-  user.retrievedCredentialsAt = new Date().getTime();
-  await user.save();
+  await dynamodb.updateUserRetrievedCredsAt(user.id, new Date().getTime());
 
   return res.status(200).json(response);
 }
