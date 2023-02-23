@@ -17,7 +17,7 @@ app.use("/verification", verification);
 
 app.get("/", (req, res) => {
   console.log(`${new Date().toISOString()} GET /`);
-  const routes = ["POST /verification", "GET /verification"];
+  const routes = ["POST /verification", "GET /verification/credentials"];
   res.status(200).json({ routes: routes });
 });
 
