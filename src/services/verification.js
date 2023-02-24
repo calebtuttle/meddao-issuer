@@ -255,20 +255,48 @@ async function handleGetCredentials(req, res) {
 
   if (process.env.NODE_ENV == "development") {
     const npiNumber = "123";
-    const response = issue(process.env.HOLONYM_ISSUER_PRIVKEY, npiNumber, "0");
+    const specialty = "0";
+    const license = "456";
+    const medicalCredentials = "MD";
+    const npiNumLicenseMedCredsHash = ethers.BigNumber.from(
+      poseidon([
+        ethers.BigNumber.from(npiNumber),
+        ethers.BigNumber.from(Buffer.from(license)),
+        ethers.BigNumber.from(Buffer.from(medicalCredentials)),
+      ])
+    ).toString();
     const metadata = {
       rawCreds: {
+        specialty: specialty,
         npiNumber: npiNumber,
+        license: license,
+        medicalCredentials: medicalCredentials,
+      },
+      derivedCreds: {
+        npiNumLicenseMedCredsHash: {
+          value: npiNumLicenseMedCredsHash,
+          derivationFunction: "poseidon",
+          inputFields: [
+            "rawCreds.npiNumber",
+            "rawCreds.license",
+            "rawCreds.medicalCredentials",
+          ],
+        },
       },
       fieldsInLeaf: [
         "issuer",
         "secret",
-        "rawCreds.npiNumber.value",
-        "",
+        "rawCreds.specialty",
+        "derivedCreds.npiNumLicenseMedCredsHash.value",
         "iat",
         "scope",
       ],
     };
+    const response = issue(
+      process.env.HOLONYM_ISSUER_PRIVKEY,
+      specialty,
+      npiNumLicenseMedCredsHash
+    );
     response.metadata = metadata;
     return res.status(200).json(response);
   }
@@ -339,7 +367,11 @@ async function handleGetCredentials(req, res) {
     ],
   };
 
-  const response = issue(process.env.HOLONYM_ISSUER_PRIVKEY, user.npiNumber.S, "0");
+  const response = issue(
+    process.env.HOLONYM_ISSUER_PRIVKEY,
+    user.specialty.N,
+    npiNumLicenseMedCredsHash
+  );
   response.metadata = metadata;
 
   await dynamodb.updateUserRetrievedCredsAt(user.id, new Date().getTime());
