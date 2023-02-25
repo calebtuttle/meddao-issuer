@@ -39,7 +39,7 @@ async function validatePostRequestParams(firstName, lastName, npiNumber, proof) 
       };
     }
     const verifKeyResp = await axios.get(
-      "https://preproc-zkp.s3.us-east-2.amazonaws.com/govIdFirstNameLastName.verification.key"
+      "https://preproc-zkp.s3.us-east-2.amazonaws.com/govIdFirstNameLastName.verifying.key"
     );
     const verificationKey = verifKeyResp.data;
     const isVerified = zokProvider.verify(verificationKey, proof);
