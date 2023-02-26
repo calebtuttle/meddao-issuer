@@ -95,157 +95,166 @@ async function validatePostRequestParams(firstName, lastName, npiNumber, proof) 
 async function handlePost(req, res) {
   logWithTimestamp("POST /verification: Entered");
 
-  const firstName = req.body.firstName;
-  const lastName = req.body.lastName;
-  const npiNumber = req.body.npiNumber;
-  const proof = req.body.proof;
+  try {
+    const firstName = req.body.firstName;
+    const lastName = req.body.lastName;
+    const npiNumber = req.body.npiNumber;
+    const proof = req.body.proof;
 
-  const validationResult = await validatePostRequestParams(
-    firstName,
-    lastName,
-    npiNumber,
-    proof
-  );
-  if (validationResult.error) {
-    logWithTimestamp(
-      `POST /verification: Invalid parameters. ${validationResult.message}`
+    const validationResult = await validatePostRequestParams(
+      firstName,
+      lastName,
+      npiNumber,
+      proof
     );
-    return res.status(400).json(validationResult);
-  }
-
-  // Query the NPI registry to confirm that the NPI number, first name, and last name all belong
-  // to a single person in the registry.
-  const resp = await axios.get(
-    `https://npiregistry.cms.hhs.gov/api/?number=${npiNumber}&first_name=${firstName}&last_name=${lastName}&country_code=&limit=&skip=&pretty=&version=2.1`
-  );
-  const npiRegistryData = resp.data;
-  console.log("npiRegistryData", JSON.stringify(npiRegistryData, null, 2));
-  if (npiRegistryData?.Errors?.length > 0) {
-    logWithTimestamp(
-      `POST /verification: Could not find NPI record for first name ${firstName}, last name ${lastName}, and NPI number ${npiNumber}`
-    );
-    return res.status(400).json({
-      error: true,
-      message: "Could not find NPI record",
-    });
-  }
-  if (npiRegistryData.result_count == 0) {
-    logWithTimestamp(
-      `POST /verification: Could not find NPI record for first name ${firstName}, last name ${lastName}, and NPI number ${npiNumber}`
-    );
-    return res.status(400).json({
-      error: true,
-      message: "Could not find NPI record",
-    });
-  }
-  const npiResult = npiRegistryData.results[0];
-  // It is necessary to check names for equality because the NPI registry will return a result
-  // even if the name only partially matches the query.
-  if (npiResult.basic?.first_name.toLowerCase() != firstName.toLowerCase()) {
-    logWithTimestamp(
-      `POST /verification: First name in NPI registry does not match first name provided by user. First name in NPI registry: ${npiResult.basic.first_name}, first name provided by user: ${firstName}`
-    );
-    return res.status(400).json({
-      error: true,
-      message: "First name in NPI registry does not match first name provided by user",
-    });
-  }
-  if (npiResult.basic?.last_name.toLowerCase() != lastName.toLowerCase()) {
-    logWithTimestamp(
-      `POST /verification: Last name in NPI registry does not match last name provided by user. Last name in NPI registry: ${npiResult.basic.last_name}, last name provided by user: ${lastName}`
-    );
-    return res.status(400).json({
-      error: true,
-      message: "Last name in NPI registry does not match last name provided by user",
-    });
-  }
-  const validCredentialTypes = ["M.D.", "MD", "D.O.", "DO"];
-  if (!validCredentialTypes.includes(npiResult.basic?.credential)) {
-    logWithTimestamp(
-      `POST /verification: User's credential type is not valid. Credential: ${npiResult.basic.credential}`
-    );
-    return res.status(400).json({
-      error: true,
-      message: "User's credential type is not valid",
-    });
-  }
-  const primaryTaxonomy = (npiResult.taxonomies ?? []).find(
-    (taxonomy) => taxonomy.primary === true
-  );
-  if (!primaryTaxonomy?.license) {
-    logWithTimestamp(
-      `POST /verification: NPI registry does not list a license for this user. NPI number: ${npiNumber}`
-    );
-    return res.status(400).json({
-      error: true,
-      message: "NPI registry does not list a license for this user",
-    });
-  }
-  if (!primaryTaxonomy?.desc) {
-    logWithTimestamp(
-      `POST /verification: NPI registry does not list a specialty for this user. NPI number: ${npiNumber}`
-    );
-    return res.status(400).json({
-      error: true,
-      message: "NPI registry does not list a specialty for this user",
-    });
-  }
-
-  let specialtyAsNumber;
-  for (const specialty of Object.keys(specialtyToTokenID)) {
-    if (primaryTaxonomy.desc.toLowerCase().includes(specialty.toLowerCase())) {
-      specialtyAsNumber = specialtyToTokenID[specialty];
-      break;
+    if (validationResult.error) {
+      logWithTimestamp(
+        `POST /verification: Invalid parameters. ${validationResult.message}`
+      );
+      return res.status(400).json(validationResult);
     }
-  }
-  if (typeof specialtyAsNumber !== "number") {
-    logWithTimestamp(
-      `POST /verification: Unsupported specialty. NPI number: ${npiNumber}, specialty: ${primaryTaxonomy.desc}`
+
+    // Query the NPI registry to confirm that the NPI number, first name, and last name all belong
+    // to a single person in the registry.
+    const resp = await axios.get(
+      `https://npiregistry.cms.hhs.gov/api/?number=${npiNumber}&first_name=${firstName}&last_name=${lastName}&country_code=&limit=&skip=&pretty=&version=2.1`
     );
-    return res.status(400).json({
+    const npiRegistryData = resp.data;
+    // console.log("npiRegistryData", JSON.stringify(npiRegistryData, null, 2));
+    if (npiRegistryData?.Errors?.length > 0) {
+      logWithTimestamp(
+        `POST /verification: Could not find NPI record for first name ${firstName}, last name ${lastName}, and NPI number ${npiNumber}`
+      );
+      return res.status(400).json({
+        error: true,
+        message: "Could not find NPI record",
+      });
+    }
+    if (npiRegistryData.result_count == 0) {
+      logWithTimestamp(
+        `POST /verification: Could not find NPI record for first name ${firstName}, last name ${lastName}, and NPI number ${npiNumber}`
+      );
+      return res.status(400).json({
+        error: true,
+        message: "Could not find NPI record",
+      });
+    }
+    const npiResult = npiRegistryData.results[0];
+    // It is necessary to check names for equality because the NPI registry will return a result
+    // even if the name only partially matches the query.
+    if (npiResult.basic?.first_name.toLowerCase() != firstName.toLowerCase()) {
+      logWithTimestamp(
+        `POST /verification: First name in NPI registry does not match first name provided by user. First name in NPI registry: ${npiResult.basic.first_name}, first name provided by user: ${firstName}`
+      );
+      return res.status(400).json({
+        error: true,
+        message:
+          "First name in NPI registry does not match first name provided by user",
+      });
+    }
+    if (npiResult.basic?.last_name.toLowerCase() != lastName.toLowerCase()) {
+      logWithTimestamp(
+        `POST /verification: Last name in NPI registry does not match last name provided by user. Last name in NPI registry: ${npiResult.basic.last_name}, last name provided by user: ${lastName}`
+      );
+      return res.status(400).json({
+        error: true,
+        message: "Last name in NPI registry does not match last name provided by user",
+      });
+    }
+    const validCredentialTypes = ["M.D.", "MD", "D.O.", "DO"];
+    if (!validCredentialTypes.includes(npiResult.basic?.credential)) {
+      logWithTimestamp(
+        `POST /verification: User's credential type is not valid. Credential: ${npiResult.basic.credential}`
+      );
+      return res.status(400).json({
+        error: true,
+        message: "User's credential type is not valid",
+      });
+    }
+    const primaryTaxonomy = (npiResult.taxonomies ?? []).find(
+      (taxonomy) => taxonomy.primary === true
+    );
+    if (!primaryTaxonomy?.license) {
+      logWithTimestamp(
+        `POST /verification: NPI registry does not list a license for this user. NPI number: ${npiNumber}`
+      );
+      return res.status(400).json({
+        error: true,
+        message: "NPI registry does not list a license for this user",
+      });
+    }
+    if (!primaryTaxonomy?.desc) {
+      logWithTimestamp(
+        `POST /verification: NPI registry does not list a specialty for this user. NPI number: ${npiNumber}`
+      );
+      return res.status(400).json({
+        error: true,
+        message: "NPI registry does not list a specialty for this user",
+      });
+    }
+
+    let specialtyTokenID;
+    for (const specialty of Object.keys(specialtyToTokenID)) {
+      if (primaryTaxonomy.desc.toLowerCase().includes(specialty.toLowerCase())) {
+        specialtyTokenID = specialtyToTokenID[specialty];
+        break;
+      }
+    }
+    if (typeof specialtyTokenID === "undefined") {
+      logWithTimestamp(
+        `POST /verification: Unsupported specialty. NPI number: ${npiNumber}, specialty: ${primaryTaxonomy.desc}`
+      );
+      return res.status(400).json({
+        error: true,
+        message: "Unsupported specialty",
+      });
+    }
+
+    const currentUser = await dynamodb.getUserByNpiNumber(npiNumber);
+
+    if (currentUser && currentUser.retrievedCredentialsAt?.S) {
+      logWithTimestamp(
+        `POST /verification: User has already been issued credentials. NPI number: ${npiNumber}`
+      );
+      return res.status(400).json({
+        error: true,
+        message: "User has already been issued credentials",
+      });
+    } else if (currentUser && !currentUser.retrievedCredentialsAt?.S) {
+      logWithTimestamp(
+        `POST /verification: User has already submitted a verification request. NPI number: ${npiNumber}. ID: ${currentUser.id?.S}`
+      );
+      return res.status(400).json({
+        error: true,
+        message: "User has already submitted a verification request",
+      });
+    }
+
+    const id = uuidV4();
+    await dynamodb.putMinimalUser(
+      id,
+      npiNumber,
+      specialtyTokenID,
+      primaryTaxonomy.license,
+      // standardize medical credentials string so that it is always either "MD" or "DO"
+      npiResult.basic.credential.replaceAll(".", "").toUpperCase()
+    );
+    logWithTimestamp(
+      `POST /verification: Saved verification request to database. NPI number: ${npiNumber}`
+    );
+
+    return res.status(200).json({
+      message:
+        "Verification request successful. You can retrieve your signed credentials using the provided ID.",
+      id: id,
+    });
+  } catch (err) {
+    console.log("An unexpected error occurred. Exiting. Error:", err);
+    return res.status(500).json({
       error: true,
-      message: "Unsupported specialty",
+      message: "An unexpected error occurred",
     });
   }
-
-  const currentUser = await dynamodb.getUserByNpiNumber(npiNumber);
-
-  if (currentUser && currentUser.retrievedCredentialsAt?.S) {
-    logWithTimestamp(
-      `POST /verification: User has already been issued credentials. NPI number: ${npiNumber}`
-    );
-    return res.status(400).json({
-      error: true,
-      message: "User has already been issued credentials",
-    });
-  } else if (currentUser && !currentUser.retrievedCredentialsAt?.S) {
-    logWithTimestamp(
-      `POST /verification: User has already submitted a verification request. NPI number: ${npiNumber}. ID: ${currentUser.id}`
-    );
-    return res.status(400).json({
-      error: true,
-      message: "User has already submitted a verification request",
-    });
-  }
-
-  const id = uuidV4();
-  await dynamodb.putMinimalUser(
-    id,
-    npiNumber,
-    specialtyAsNumber,
-    primaryTaxonomy.license,
-    // standardize medical credentials string so that it is always either "MD" or "DO"
-    npiResult.basic.credential.replaceAll(".", "").toUpperCase()
-  );
-  logWithTimestamp(
-    `POST /verification: Saved verification request to database. NPI number: ${npiNumber}`
-  );
-
-  return res.status(200).json({
-    message:
-      "Verification request successful. You can retrieve your signed credentials using the provided ID.",
-    id: id,
-  });
 }
 
 // GET endpoint signs the user's credentials and returns them to the user. This
@@ -253,24 +262,99 @@ async function handlePost(req, res) {
 async function handleGetCredentials(req, res) {
   logWithTimestamp("GET /verification/credentials: Entered");
 
-  if (process.env.NODE_ENV == "development") {
-    const npiNumber = "123";
-    const specialty = "0";
-    const license = "456";
-    const medicalCredentials = "MD";
+  try {
+    if (process.env.NODE_ENV == "development") {
+      const npiNumber = "123";
+      const specialty = "0";
+      const license = "456";
+      const medicalCredentials = "MD";
+      const npiNumLicenseMedCredsHash = ethers.BigNumber.from(
+        poseidon([
+          ethers.BigNumber.from(npiNumber),
+          ethers.BigNumber.from(Buffer.from(license)),
+          ethers.BigNumber.from(Buffer.from(medicalCredentials)),
+        ])
+      ).toString();
+      const metadata = {
+        rawCreds: {
+          specialty: specialty,
+          npiNumber: npiNumber,
+          license: license,
+          medicalCredentials: medicalCredentials,
+        },
+        derivedCreds: {
+          npiNumLicenseMedCredsHash: {
+            value: npiNumLicenseMedCredsHash,
+            derivationFunction: "poseidon",
+            inputFields: [
+              "rawCreds.npiNumber",
+              "rawCreds.license",
+              "rawCreds.medicalCredentials",
+            ],
+          },
+        },
+        fieldsInLeaf: [
+          "issuer",
+          "secret",
+          "rawCreds.specialty",
+          "derivedCreds.npiNumLicenseMedCredsHash.value",
+          "iat",
+          "scope",
+        ],
+      };
+      const response = issue(
+        process.env.HOLONYM_ISSUER_PRIVKEY,
+        specialty,
+        npiNumLicenseMedCredsHash
+      );
+      response.metadata = metadata;
+      return res.status(200).json(response);
+    }
+
+    // const npiNumber = req.query.npiNumber;
+    const id = req.query.id;
+
+    if (!id) {
+      return res.status(400).json({
+        error: true,
+        message: "Missing ID",
+      });
+    }
+
+    const user = await dynamodb.getUserById(id);
+
+    if (!user) {
+      return res.status(400).json({
+        error: true,
+        message: "User not found",
+      });
+    }
+    if (user.retrievedCredentialsAt?.S) {
+      return res.status(400).json({
+        error: true,
+        message: "User has already retrieved credentials",
+      });
+    }
+
+    // NOTE: Re: specialty being encoded as a number:
+    // Morgan Stuart of MedDAO: "when @gcecil made the Edition contract on thirdweb
+    // to mint the NFT’s he assigned a number to each specialty— actually becomes
+    // very important because that is how we will achieve organizational structure
+    // within medDAO and its tools/primitives
+
     const npiNumLicenseMedCredsHash = ethers.BigNumber.from(
       poseidon([
-        ethers.BigNumber.from(npiNumber),
-        ethers.BigNumber.from(Buffer.from(license)),
-        ethers.BigNumber.from(Buffer.from(medicalCredentials)),
+        ethers.BigNumber.from(user.npiNumber.S),
+        ethers.BigNumber.from(Buffer.from(user.license.S)),
+        ethers.BigNumber.from(Buffer.from(user.medicalCredentials.S)),
       ])
     ).toString();
     const metadata = {
       rawCreds: {
-        specialty: specialty,
-        npiNumber: npiNumber,
-        license: license,
-        medicalCredentials: medicalCredentials,
+        specialty: user.specialty.N,
+        npiNumber: user.npiNumber.S,
+        license: user.license.S,
+        medicalCredentials: user.medicalCredentials.S,
       },
       derivedCreds: {
         npiNumLicenseMedCredsHash: {
@@ -292,91 +376,24 @@ async function handleGetCredentials(req, res) {
         "scope",
       ],
     };
+
     const response = issue(
       process.env.HOLONYM_ISSUER_PRIVKEY,
-      specialty,
+      user.specialty.N,
       npiNumLicenseMedCredsHash
     );
     response.metadata = metadata;
+
+    await dynamodb.updateUserRetrievedCredsAt(user.id, new Date().getTime());
+
     return res.status(200).json(response);
-  }
-
-  // const npiNumber = req.query.npiNumber;
-  const id = req.query.id;
-
-  if (!id) {
-    return res.status(400).json({
+  } catch (err) {
+    console.log("An unexpected error occurred. Exiting. Error:", err);
+    return res.status(500).json({
       error: true,
-      message: "Missing ID",
+      message: "An unexpected error occurred",
     });
   }
-
-  const user = await dynamodb.getUserById(id);
-
-  if (!user) {
-    return res.status(400).json({
-      error: true,
-      message: "User not found",
-    });
-  }
-  if (user.retrievedCredentialsAt?.S) {
-    return res.status(400).json({
-      error: true,
-      message: "User has already retrieved credentials",
-    });
-  }
-
-  // NOTE: Re: specialty being encoded as a number:
-  // Morgan Stuart of MedDAO: "when @gcecil made the Edition contract on thirdweb
-  // to mint the NFT’s he assigned a number to each specialty— actually becomes
-  // very important because that is how we will achieve organizational structure
-  // within medDAO and its tools/primitives
-
-  const npiNumLicenseMedCredsHash = ethers.BigNumber.from(
-    poseidon([
-      ethers.BigNumber.from(user.npiNumber.S),
-      ethers.BigNumber.from(Buffer.from(user.license.S)),
-      ethers.BigNumber.from(Buffer.from(user.medicalCredentials.S)),
-    ])
-  ).toString();
-  const metadata = {
-    rawCreds: {
-      specialty: user.specialty.N,
-      npiNumber: user.npiNumber.S,
-      license: user.license.S,
-      medicalCredentials: user.medicalCredentials.S,
-    },
-    derivedCreds: {
-      npiNumLicenseMedCredsHash: {
-        value: npiNumLicenseMedCredsHash,
-        derivationFunction: "poseidon",
-        inputFields: [
-          "rawCreds.npiNumber",
-          "rawCreds.license",
-          "rawCreds.medicalCredentials",
-        ],
-      },
-    },
-    fieldsInLeaf: [
-      "issuer",
-      "secret",
-      "rawCreds.specialty",
-      "derivedCreds.npiNumLicenseMedCredsHash.value",
-      "iat",
-      "scope",
-    ],
-  };
-
-  const response = issue(
-    process.env.HOLONYM_ISSUER_PRIVKEY,
-    user.specialty.N,
-    npiNumLicenseMedCredsHash
-  );
-  response.metadata = metadata;
-
-  await dynamodb.updateUserRetrievedCredsAt(user.id, new Date().getTime());
-
-  return res.status(200).json(response);
 }
 
 export { handlePost, handleGetCredentials };
