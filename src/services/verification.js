@@ -96,6 +96,14 @@ async function handlePost(req, res) {
   logWithTimestamp("POST /verification: Entered");
 
   try {
+    if (process.env.NODE_ENV == "development") {
+      return res.status(200).json({
+        message:
+          "Verification request successful. You can retrieve your signed credentials using the provided ID.",
+        id: "123",
+      });
+    }
+
     const firstName = req.body.firstName;
     const lastName = req.body.lastName;
     const npiNumber = req.body.npiNumber;
