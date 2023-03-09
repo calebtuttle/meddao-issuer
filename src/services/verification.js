@@ -150,14 +150,17 @@ async function handlePost(req, res) {
     const npiResult = npiRegistryData.results[0];
     // It is necessary to check names for equality because the NPI registry will return a result
     // even if the name only partially matches the query.
-    if (npiResult.basic?.first_name.toLowerCase() != firstName.toLowerCase()) {
+    const npiResultFirstnameMiddlename =
+      npiResult.basic.first_name && npiResult.basic.middle_name
+        ? `${npiResult.basic.first_name} ${npiResult.basic.middle_name}`
+        : npiResult.basic.first_name;
+    if (npiResultFirstnameMiddlename.toLowerCase() != firstName.toLowerCase()) {
       logWithTimestamp(
-        `POST /verification: First name in NPI registry does not match first name provided by user. First name in NPI registry: ${npiResult.basic.first_name}, first name provided by user: ${firstName}`
+        `POST /verification: First name in NPI registry does not match first name provided by user. First name and middle name in NPI registry: ${npiResultFirstnameMiddlename}, first name provided by user: ${firstName}`
       );
       return res.status(400).json({
         error: true,
-        message:
-          "First name in NPI registry does not match first name provided by user",
+        message: "Name in NPI registry does not match name provided by user",
       });
     }
     if (npiResult.basic?.last_name.toLowerCase() != lastName.toLowerCase()) {
